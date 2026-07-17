@@ -19,7 +19,9 @@ from common import (
     driver,
     log,
     MAIN_TEAM_NAME,
-    get_channel_member_ids,
+    get_channel_members_full,
+    _member_is_channel_admin,
+    promote_to_channel_admin,
     get_dm_channel_id,
     now_local,
     today_local,
@@ -102,33 +104,55 @@ def get_shared_channel_members(birthday_user_id, team_id):
     """
     Ищет каналы (публичные/приватные, не ЛС и не групповые сообщения) внутри
     основной команды (team_id), в которых состоят одновременно бот и именинник.
-    Возвращает объединённое множество user_id всех участников этих каналов
-    (без самого именинника и без бота).
+
+    Возвращает кортеж (member_ids, admin_ids):
+      • member_ids — объединённое множество user_id всех участников этих каналов;
+      • admin_ids  — те из них, кто является администратором хотя бы одного такого
+        исходного канала (им во временном ДР-канале выдаются права админа).
+    Оба множества — без самого именинника и без бота.
     """
     bot_id = driver.client.userid
     member_ids = set()
+    admin_ids = set()
 
     try:
         bot_channels = driver.channels.get_channels_for_user(bot_id, team_id)
     except Exception as e:
         log.warning("Не удалось получить каналы бота в команде %s: %s", team_id, e)
-        return member_ids
+        return member_ids, admin_ids
 
     for ch in bot_channels:
         # пропускаем личные (D) и групповые (G) сообщения — нас интересуют
         # только обычные публичные/приватные каналы команды
         if ch.get("type") not in ("O", "P"):
             continue
-        # get_channel_member_ids постранично обходит участников (по 200 за раз);
-        # прямой вызов get_channel_members без пагинации возвращал только первую
-        # страницу (~60 человек) и «терял» коллег в больших каналах.
-        channel_member_ids = get_channel_member_ids(ch["id"])
+        # get_channel_members_full постранично обходит участников (по 200 за раз)
+        # и сохраняет роли; прямой вызов get_channel_members без пагинации возвращал
+        # только первую страницу (~60 человек) и «терял» коллег в больших каналах.
+        members = get_channel_members_full(ch["id"])
+        channel_member_ids = {m.get("user_id") for m in members if m.get("user_id")}
         if birthday_user_id in channel_member_ids:
             member_ids |= channel_member_ids
+            for m in members:
+                uid = m.get("user_id")
+                if uid and _member_is_channel_admin(m):
+                    admin_ids.add(uid)
 
     member_ids.discard(birthday_user_id)
     member_ids.discard(bot_id)
-    return member_ids
+    admin_ids.discard(birthday_user_id)
+    admin_ids.discard(bot_id)
+    return member_ids, admin_ids
+
+
+def grant_channel_admins(channel_id, admin_ids):
+    """Выдаёт роль администратора нового ДР-канала перечисленным пользователям.
+
+    Их предварительно уже добавили в канал (add_members_to_channel), поэтому
+    роль назначается участникам. Вызывать через run_in_thread.
+    """
+    for uid in admin_ids:
+        promote_to_channel_admin(channel_id, uid)
 
 
 def create_birthday_channel(team_id, username, fullname, occurrence_year):
@@ -212,7 +236,7 @@ async def _create_group_for_user(user_row, cd, days_until, main_team_id):
         log.warning("Не удалось получить пользователя %s: %s", user_id, e)
         return None
 
-    member_ids = await run_in_thread(
+    member_ids, admin_ids = await run_in_thread(
         get_shared_channel_members, user_id, main_team_id
     )
     if not member_ids:
@@ -235,6 +259,10 @@ async def _create_group_for_user(user_row, cd, days_until, main_team_id):
         return None
 
     await run_in_thread(add_members_to_channel, channel_id, member_ids)
+
+    # Админам исходных каналов выдаём права администратора и в этом ДР-канале.
+    if admin_ids:
+        await run_in_thread(grant_channel_admins, channel_id, admin_ids)
 
     birth_dt = parse_birth_dt(user_row["user_birth"])
 

@@ -663,12 +663,21 @@ def is_team_member(user_id, team_id):
         return False
 
 
-def get_channel_member_ids(channel_id):
+def _member_is_channel_admin(member):
+    """True, если объект участника канала помечен как администратор канала."""
+    if member.get("scheme_admin"):
+        return True
+    return "channel_admin" in _roles_of(member)
+
+
+def get_channel_members_full(channel_id):
     """
-    Возвращает множество user_id всех участников канала.
+    Возвращает список объектов участников канала (с полями roles/scheme_admin).
     Постранично обходит API Mattermost (по 200 участников на страницу).
+    В отличие от get_channel_member_ids сохраняет роли — нужно, чтобы понять,
+    кто из участников является администратором канала.
     """
-    member_ids = set()
+    members_all = []
     page = 0
     per_page = 200
     while True:
@@ -681,11 +690,41 @@ def get_channel_member_ids(channel_id):
             break
         if not members:
             break
-        for m in members:
-            uid = m.get("user_id")
-            if uid:
-                member_ids.add(uid)
+        members_all.extend(members)
         if len(members) < per_page:
             break
         page += 1
+    return members_all
+
+
+def get_channel_member_ids(channel_id):
+    """
+    Возвращает множество user_id всех участников канала.
+    Постранично обходит API Mattermost (по 200 участников на страницу).
+    """
+    member_ids = set()
+    for m in get_channel_members_full(channel_id):
+        uid = m.get("user_id")
+        if uid:
+            member_ids.add(uid)
     return member_ids
+
+
+def promote_to_channel_admin(channel_id, user_id):
+    """
+    Выдаёт пользователю роль администратора данного канала.
+    Пользователь уже должен быть участником канала. Ошибки только логируются.
+    """
+    try:
+        driver.channels.update_channel_roles(
+            channel_id, user_id, {"roles": "channel_user channel_admin"}
+        )
+        return True
+    except Exception as e:
+        log.warning(
+            "Не удалось выдать права админа канала %s пользователю %s: %s",
+            channel_id,
+            user_id,
+            e,
+        )
+        return False
