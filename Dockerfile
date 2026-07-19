@@ -2,16 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Индекс PyPI. По умолчанию публичный; на закрытом хосте передаётся через
-# --build-arg на внутреннее зеркало (Nexus/Artifactory), т.к. pypi.org недоступен.
-ARG PIP_INDEX_URL=https://pypi.org/simple
-ARG PIP_TRUSTED_HOST=pypi.org
-
 # Сначала зависимости — слой кэшируется и не пересобирается при правках кода.
+# Пакеты берём из внутреннего зеркала PyPI (публичный pypi.org с хоста недоступен).
 COPY requirements.txt .
 RUN pip install --no-cache-dir \
-        --index-url "$PIP_INDEX_URL" \
-        --trusted-host "$PIP_TRUSTED_HOST" \
+        --index-url https://repo.corp.tander.ru/repository/pypi/simple \
+        --trusted-host repo.corp.tander.ru \
         -r requirements.txt
 
 # Затем сам код бота.
