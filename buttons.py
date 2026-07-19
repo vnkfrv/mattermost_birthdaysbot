@@ -1861,7 +1861,10 @@ async def _handle_button(request):
         else:
             text = "Неизвестная кнопка."
 
-        await _send_ephemeral(user_id, channel_id, text)
+        # ephemeral_text в ответе на нажатие кнопки: Mattermost сам показывает
+        # это сообщение нажавшему, БЕЗ прав system_admin (в отличие от
+        # create_ephemeral_post). Отдаём текст прямо в ответе колбэка.
+        return web.json_response({"ephemeral_text": text})
     except Exception as e:
         log.exception("Ошибка обработки нажатия кнопки (action=%s): %s", action, e)
 
