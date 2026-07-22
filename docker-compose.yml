@@ -1,0 +1,13 @@
+services:
+  birthday-bot:
+    image: mm-birthdaybot-nikiforov:latest
+    container_name: mm-birthdaybot-nikiforov
+    restart: unless-stopped
+    env_file:
+      - .env
+    # левая часть — порт хоста (8082 свободен), правая — BUTTON_PORT внутри контейнера
+    ports:
+      - "8082:8081"
+    # БД переживает пересоздание контейнера
+    volumes:
+      - ./data:/app/data

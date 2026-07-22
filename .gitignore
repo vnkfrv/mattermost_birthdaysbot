@@ -1,5 +1,9 @@
 .venv/
 __pycache__/
 .env
-.db
+*.db
+*.db-wal
+*.db-shm
 data/
+*.tar
+*.tar.gz
